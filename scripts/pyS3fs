@@ -1,0 +1,22 @@
+#!/usr/bin/env python2
+
+# -*- coding: utf-8 -*-
+
+import logging
+from fuse import FUSE
+
+from pyS3fs.fs import S3fs, Memory
+from sys import argv, exit
+
+def run():
+
+    if len(argv) != 2:
+        print('usage: %s <mountpoint>' % argv[0])
+        exit(1)
+
+    logging.getLogger().setLevel(logging.DEBUG)
+    #fuse = FUSE(Memory(), argv[1], foreground=True)
+    fuse = FUSE(S3fs(), argv[1], foreground=True)
+
+if __name__ == "__main__":
+    run()
