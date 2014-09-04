@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import functools 
+import functools
 import signal
 
 from boto.s3.connection  import  S3Connection

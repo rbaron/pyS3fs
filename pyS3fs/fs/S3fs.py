@@ -94,6 +94,10 @@ class S3fs(LoggingMixIn, Operations):
         self.S3Client.put_file(path, data)
         return len(data)
 
+    def truncate(self, path, length, fh=None):
+        logging.debug("truncate path={} length={} fh={}".format(path, length, fh))
+        pass
+
     def unlink(self, path):
         logging.debug("unlink path={}".format(path))
         self.S3Client.delete_file(path)
