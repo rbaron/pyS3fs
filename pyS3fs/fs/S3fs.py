@@ -1,193 +1,117 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import syslog
-import os
-import sys
+
+from errno import ENOENT
 
 from pyS3fs.net import S3Client
+from pyS3fs.fs import File, Dir
+from pyS3fs.fs import NodeNotFound, debug_print_tree
 
-from collections import defaultdict
-from errno import ENOENT
-from stat import S_IFDIR, S_IFLNK, S_IFREG
-from sys import argv, exit
-from time import time
-
-from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
-
-if not hasattr(__builtins__, 'bytes'):
-    bytes = str
-
+from fuse import FuseOSError, Operations, LoggingMixIn
 
 class S3fs(LoggingMixIn, Operations):
 
     def __init__(self):
         self.S3Client = S3Client()
+        self.root_node = Dir(name="")
+        logging.info("Creating file tree...")
+        filenames = self.S3Client.list_files()
+        self._parse_filenames_into_tree(filenames)
+        logging.info("Created.")
+
+    def _get_nodes_names(self, full_path):
+        tokens = full_path.split("/")
+        return filter(lambda t: t != "", tokens)
+
+    def _get_dir_and_file_names(self, full_path):
+        file_name = None
+        dir_names = []
+        tokens = full_path.split("/")
+        if tokens[-1] != "":
+            file_name = tokens.pop()
+        dir_names = filter(lambda t: t != "", tokens)
+        return dir_names, file_name
+
+    def _parse_filenames_into_tree(self, filenames):
+        for f in filenames:
+            self._add_path_to_tree(f)
+
+    def _add_path_to_tree(self, full_path):
+        dir_names, file_name = self._get_dir_and_file_names(full_path)
+
+        ancestor = self.root_node
+        for dir_name in dir_names:
+            ancestor = ancestor.append_child(Dir(name=dir_name))
+        if file_name:
+            ancestor.append_child(File(name=file_name))
+
+    def _remove_path_from_tree(self, full_path):
+        node_names = self._get_nodes_names(full_path)
+
+        node = self.root_node
+        try:
+            for node_name in node_names[:-1]:
+                node = node.get_child(node_name)
+            node.delete_child(node_names[-1])
+        except NodeNotFound:
+            raise ValueError
+
+    def _get_node(self, full_path):
+        dir_names, file_name = self._get_dir_and_file_names(full_path)
+
+        node = self.root_node
+        try:
+            for dir_name in dir_names:
+                node = node.get_child(dir_name)
+            if file_name:
+                return node.get_child(file_name)
+            else:
+                return node
+        except NodeNotFound:
+            return None
 
     def getattr(self, path, fh=None):
+        logging.debug("getattr path={}, fh={}".format(path, fh))
 
-        def _is_dir(path):
-            return True if path == "/" else False 
+        node = self._get_node(path)
+        if not node:
+            raise FuseOSError(ENOENT)
 
-        print "getattr path={}, fh={}".format(path, fh)
-
-        #if path not in self.files:
-        #    raise FuseOSError(ENOENT)
-
-        if _is_dir(path): 
-            st = dict(st_mode=(S_IFDIR | 0755), st_nlink=2)
-        else:
-            st = dict(st_mode=(S_IFREG | 0444), st_size=4096)
-
-        st['st_ctime'] = st['st_mtime'] = st['st_atime'] = time()
-        return st
+        return node.get_attrs()
 
     def read(self, path, size, offset, fh):
-        print "read"
+        logging.debug("read path={} size={} offset={} fh={}".format(path, size, offset, fh))
         return self.S3Client.get_file(path)
 
+    def create(self, path, mode):
+        logging.debug("create path={} mode={}".format(path, mode))
+        self._add_path_to_tree(path)
+        return 0
+
     def write(self, path, data, offset, fh):
-        print "write"
+        logging.debug("write path={} datalen={}".format(path, len(data)))
         self.S3Client.put_file(path, data)
         return len(data)
 
+    def unlink(self, path):
+        logging.debug("unlink path={}".format(path))
+        self.S3Client.delete_file(path)
+        self._remove_path_from_tree(path)
+
     def readdir(self, path, fh):
-        print "readdir"
-        files = self.S3Client.list_files()
-        return files
-
-
-class Memory(LoggingMixIn, Operations):
-    'Example memory filesystem. Supports only one level of files.'
-
-    def __init__(self):
-        self.files = {}
-        self.data = defaultdict(bytes)
-        self.fd = 0
-        now = time()
-        self.files['/'] = dict(st_mode=(S_IFDIR | 0755), st_ctime=now,
-                               st_mtime=now, st_atime=now, st_nlink=2)
-
-
-    def chmod(self, path, mode):
-        print "chmod"
-        self.files[path]['st_mode'] &= 0770000
-        self.files[path]['st_mode'] |= mode
-        return 0
-
-    def chown(self, path, uid, gid):
-        print "chown"
-        self.files[path]['st_uid'] = uid
-        self.files[path]['st_gid'] = gid
-
-    def create(self, path, mode):
-        print "create"
-        self.files[path] = dict(st_mode=(S_IFREG | mode), st_nlink=1,
-                                st_size=0, st_ctime=time(), st_mtime=time(),
-                                st_atime=time())
-
-        self.fd += 1
-        return self.fd
-
-    def getattr(self, path, fh=None):
-        print "getattr"
-        if path not in self.files:
-            raise FuseOSError(ENOENT)
-
-        return self.files[path]
-
-    def getxattr(self, path, name, position=0):
-        print "getattrx"
-        attrs = self.files[path].get('attrs', {})
-
-        try:
-            return attrs[name]
-        except KeyError:
-            return ''       # Should return ENOATTR
-
-    def listxattr(self, path):
-        print "listxattr"
-        attrs = self.files[path].get('attrs', {})
-        return attrs.keys()
+        logging.debug("readdir path: {}, fh: {}".format(path, fh))
+        node = self._get_node(path)
+        return [n.name for n in node.children]
 
     def mkdir(self, path, mode):
-        print "mkdir"
-        self.files[path] = dict(st_mode=(S_IFDIR | mode), st_nlink=2,
-                                st_size=0, st_ctime=time(), st_mtime=time(),
-                                st_atime=time())
+        logging.debug("mkdir path={} mode={}".format(path, mode))
+        self.S3Client.put_file(path+"/", data="")
+        self._add_path_to_tree(path+"/")
 
-        self.files['/']['st_nlink'] += 1
-
-    def open(self, path, flags):
-        print "open"
-        self.fd += 1
-        return self.fd
-
-    def read(self, path, size, offset, fh):
-        print "read"
-        return self.data[path][offset:offset + size]
-
-    def readdir(self, path, fh):
-        print "readdir"
-        return ['.', '..'] + [x[1:] for x in self.files if x != '/']
-
-    def readlink(self, path):
-        print "readlink"
-        return self.data[path]
-
-    def removexattr(self, path, name):
-        print "removexattr"
-        attrs = self.files[path].get('attrs', {})
-
-        try:
-            del attrs[name]
-        except KeyError:
-            pass        # Should return ENOATTR
-
-    def rename(self, old, new):
-        print "rename"
-        self.files[new] = self.files.pop(old)
-
+    # rmdir already recursively calls unlink for files and rmdir for subdirs!
     def rmdir(self, path):
-        print "rmdir"
-        self.files.pop(path)
-        self.files['/']['st_nlink'] -= 1
+        logging.debug("rmdir path={}".format(path))
+        self.S3Client.delete_file(path+"/")
+        self._remove_path_from_tree(path+"/")
 
-    def setxattr(self, path, name, value, options, position=0):
-        print "setxattr"
-        # Ignore options
-        attrs = self.files[path].setdefault('attrs', {})
-        attrs[name] = value
-
-    def statfs(self, path):
-        print "statfs"
-        return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
-
-    def symlink(self, target, source):
-        print "symlink"
-        self.files[target] = dict(st_mode=(S_IFLNK | 0777), st_nlink=1,
-                                  st_size=len(source))
-
-        self.data[target] = source
-
-    def truncate(self, path, length, fh=None):
-        print "truncate"
-        self.data[path] = self.data[path][:length]
-        self.files[path]['st_size'] = length
-
-    def unlink(self, path):
-        print "unlink"
-        self.files.pop(path)
-
-    def utimens(self, path, times=None):
-        print "utimens"
-        now = time()
-        atime, mtime = times if times else (now, now)
-        self.files[path]['st_atime'] = atime
-        self.files[path]['st_mtime'] = mtime
-
-    def write(self, path, data, offset, fh):
-        print "write"
-        self.data[path] = self.data[path][:offset] + data
-        self.files[path]['st_size'] = len(self.data[path])
-        return len(data)

@@ -9,10 +9,6 @@ from boto.exception import S3CreateError
 
 from pyS3fs.config import config
 
-# Dirty hack so that "/" won't mess up the ls command.
-# As of now, all keys are treated as files and there is
-# no concept of directories.
-SLASH_PLACEHOLDER = u"__SLASH__"
 
 class S3BucketAlreadyExistsException(Exception):
     pass
@@ -21,9 +17,12 @@ class S3BucketAlreadyExistsException(Exception):
 class S3TimeoutException(Exception):
     pass
 
+
 # Decorator for setting custom timeout for http(s) calls, since
-# boto only accepts timeout through it's own configuration
-# Cool ideia but only works in main thread
+# boto only accepts timeout through it's own configuration.
+# Cool ideia but only works in main thread :(
+# TODO: Monkey patch boto for custom timeout, so that we don't
+# have to setup yet another config file specially for boto.
 HTTP_REQUEST_TIMEOUT = 1
 def timeout_watcher(timeout_in_seconds=HTTP_REQUEST_TIMEOUT):
     def timeout_handler(signum, frame):
@@ -43,28 +42,34 @@ def timeout_watcher(timeout_in_seconds=HTTP_REQUEST_TIMEOUT):
 
 class S3Client(object):
     def __init__(self):
-        print "Creating client"
+        logging.info("Creating client")
         self._connect(config["aws_key"], config["aws_secret"])
         self._get_or_create_bucket(config["aws_bucket_name"])
 
     def put_file(self, key_name, data):
         self.bucket.new_key(key_name).set_contents_from_string(data)
 
+    def delete_file(self, key_name):
+        self.bucket.delete_key(key_name)
+
+    def delete_files(self, key_prefix):
+        keys = self.bucket.list(prefix=key_prefix)
+        self.bucket.delete_keys(keys)
+
     def get_file(self, key_name):
         key_name = key_name.replace(SLASH_PLACEHOLDER, u"/")
         return self.bucket.get_key(key_name).get_contents_as_string()
 
     def list_files(self):
-        return [key.name.replace("/", SLASH_PLACEHOLDER)
-                for key in self.bucket.get_all_keys()]
+        return [key.name for key in self.bucket.get_all_keys()]
 
     def _connect(self, aws_key, aws_secret):
-        print "Connecting"
+        logging.info("Connecting to S3...")
         self.conn = S3Connection(aws_key, aws_secret)
-        print "Connected"
+        logging.info("Connected.")
 
     def _get_or_create_bucket(self, bucket_name):
-        print "Will create bucket"
+        logging.info("Getting bucket...")
         self.bucket = self.conn.lookup(bucket_name)
         if not self.bucket:
             try:
@@ -74,4 +79,4 @@ class S3Client(object):
                     " another name and change your config file")
                 raise S3BucketAlreadyExistsException()
 
-        print "Got bucket"
+        logging.info("Got bucket.")

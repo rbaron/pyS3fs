@@ -17,7 +17,6 @@ class ConfigDirectiveNotFoundException(Exception):
 
 class _Config(object):
     def __init__(self):
-        print "Config reading"
         self.ConfigParser = ConfigParser.ConfigParser()
 
         try:
