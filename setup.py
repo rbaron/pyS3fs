@@ -6,6 +6,6 @@ setup(
       version="0.1",
       url="http://github.com/rbaron/pyS3fs",
       install_requires=["fusepy", "boto"],
-      packages=["pyS3fs"],
+      packages=find_packages(),
       scripts=["scripts/pyS3fs"]
      )
