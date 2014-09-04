@@ -6,7 +6,7 @@ Mount Amazon's S3 storage as a filesystem.
 Installation
 ------------
 
-pyS3fs is available on PyPi. To install it, make sure you have [fuse"](http://fuse.sourceforge.net/) installed and simply type on your terminal:
+pyS3fs is available on PyPi. To install it, make sure you have [fuse](http://fuse.sourceforge.net/) installed and simply type on your terminal:
 
 ```bash
 $ pip install pyS3fs
