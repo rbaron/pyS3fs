@@ -57,7 +57,6 @@ class S3Client(object):
         self.bucket.delete_keys(keys)
 
     def get_file(self, key_name):
-        key_name = key_name.replace(SLASH_PLACEHOLDER, u"/")
         return self.bucket.get_key(key_name).get_contents_as_string()
 
     def list_files(self):
