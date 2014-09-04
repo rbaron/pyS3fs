@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+from __future__ import division
+
 import logging
 import functools
 import signal
@@ -47,7 +49,9 @@ class S3Client(object):
         self._get_or_create_bucket(config["aws_bucket_name"])
 
     def put_file(self, key_name, data):
-        self.bucket.new_key(key_name).set_contents_from_string(data)
+        def callback(bytes_sent, bytes_total):
+            logging.info("Uploading {:10.2f}: {}%".format(key_name, 100*bytes_sent/bytes_total))
+        self.bucket.new_key(key_name).set_contents_from_string(data, cb=callback)
 
     def delete_file(self, key_name):
         self.bucket.delete_key(key_name)
@@ -57,10 +61,12 @@ class S3Client(object):
         self.bucket.delete_keys(keys)
 
     def get_file(self, key_name):
-        return self.bucket.get_key(key_name).get_contents_as_string()
+        def callback(bytes_sent, bytes_total):
+            logging.info("Downloading {}: {:10.2f}%".format(key_name, 100*bytes_sent/bytes_total))
+        return self.bucket.get_key(key_name).get_contents_as_string(cb=callback)
 
-    def list_files(self):
-        return [key.name for key in self.bucket.get_all_keys()]
+    def list_filenames_and_sizes(self):
+        return [(key.name, key.size) for key in self.bucket.get_all_keys()]
 
     def _connect(self, aws_key, aws_secret):
         logging.info("Connecting to S3...")

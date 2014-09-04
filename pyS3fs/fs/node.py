@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 
+
 def debug_print_tree(root, level=0):
     print ("\t"*level)+"root: {}, has {} children".format(root.name, len(root.children))
     for child in root.children:
@@ -18,6 +19,10 @@ class _Node(object):
 
     def get_attrs(self):
         raise NotImplemented("This method should only be called on a subclass")
+
+    def set_attrs(self, **kwargs):
+        for key, value in kwargs:
+            self.key = value
 
     def get_child(self, name):
         try:
@@ -39,8 +44,12 @@ class _Node(object):
             raise NodeNotFound
 
 class File(_Node):
+    def __init__(self, name, size):
+        super(File, self).__init__(name)
+        self.st_size = size
+
     def get_attrs(self):
-        return dict(st_mode=(S_IFREG | 0644), st_size=4096,
+        return dict(st_mode=(S_IFREG | 0644), st_size=self.st_size,
                     st_ctime=0, st_mtime=0, st_atime=0)
 
 
